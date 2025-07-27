@@ -239,80 +239,114 @@ def descargar_historial():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+# EXPANSIÓN MODULAR PARA SISTEMA DE AMIGOS Y CHAT PRIVADO
+# Este bloque debe integrarse en el archivo principal "app.py" justo después de los modelos y antes de las rutas
 
-# --- INICIO: Chat Privado entre Amigos ---
+from sqlalchemy import or_
+from flask import jsonify
 
-@app.route("/chat/<amigo>", methods=["GET", "POST"])
-@login_required
-def chat(amigo):
-    usuario = User.query.filter_by(username=session["usuario"]).first()
-    amigo_usuario = User.query.filter_by(username=amigo).first()
-
-    if not amigo_usuario:
-        return "Usuario no encontrado."
-
-    # Verificar si son amigos
-    son_amigos = Friend.query.filter(
-        ((Friend.user_id == usuario.id) & (Friend.friend_id == amigo_usuario.id)) |
-        ((Friend.user_id == amigo_usuario.id) & (Friend.friend_id == usuario.id))
-    ).first()
-
-    if not son_amigos:
-        return "No sois amigos."
-
-    mensajes = ChatMessage.query.filter(
-        ((ChatMessage.user_from == usuario.username) & (ChatMessage.user_to == amigo)) |
-        ((ChatMessage.user_from == amigo) & (ChatMessage.user_to == usuario.username))
-    ).order_by(ChatMessage.timestamp.asc()).all()
-
-    if request.method == "POST":
-        contenido = request.form.get("mensaje")
-        if contenido:
-            nuevo_mensaje = ChatMessage(user_from=usuario.username, user_to=amigo, content=contenido)
-            db.session.add(nuevo_mensaje)
-            db.session.commit()
-            return redirect(url_for("chat", amigo=amigo))
-
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="es">
-    <head>
-        <meta charset="UTF-8">
-        <title>Chat con {{ amigo }}</title>
-        <style>
-            body { font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 20px; }
-            .chat-container { max-width: 700px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; }
-            .mensaje { margin-bottom: 10px; padding: 10px; background: #e9ecef; border-radius: 5px; }
-            .yo { background: #d1e7dd; text-align: right; }
-            .formulario { margin-top: 20px; display: flex; gap: 10px; }
-            .formulario input[type=text] { flex-grow: 1; padding: 10px; }
-            .formulario button { padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
-        </style>
-    </head>
-    <body>
-        <div class="chat-container">
-            <h2>Chat con {{ amigo }}</h2>
-            {% for m in mensajes %}
-                <div class="mensaje {% if m.user_from == usuario %}yo{% endif %}">
-                    <strong>{{ m.user_from }}</strong>: {{ m.content }}
-                </div>
-            {% endfor %}
-            <form class="formulario" method="POST">
-                <input type="text" name="mensaje" placeholder="Escribe tu mensaje..." required>
-                <button type="submit">Enviar</button>
-            </form>
-            <a href="/dashboard">Volver al panel</a>
-        </div>
-    </body>
-    </html>
-    """, amigo=amigo, mensajes=mensajes, usuario=usuario.username)
-
-# Modelo para mensajes de chat
+# ------------------------ MODELO PARA MENSAJES DE CHAT ------------------------
 class ChatMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_from = db.Column(db.String(150), nullable=False)
-    user_to = db.Column(db.String(150), nullable=False)
-    content = db.Column(db.Text, nullable=False)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    message = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- FIN: Chat Privado entre Amigos ---
+# ------------------------ FUNCIÓN PARA COMPROBAR AMISTAD ------------------------
+def son_amigos(user1_id, user2_id):
+    return Amistad.query.filter(
+        or_(
+            (Amistad.usuario_id == user1_id) & (Amistad.amigo_id == user2_id),
+            (Amistad.usuario_id == user2_id) & (Amistad.amigo_id == user1_id)
+        )
+    ).first() is not None
+
+# ------------------------ RUTA PARA AGREGAR AMIGOS ------------------------
+@app.route("/agregar_amigo", methods=["POST"])
+@login_required
+def agregar_amigo():
+    amigo_email = request.form.get("email")
+    amigo = User.query.filter_by(email=amigo_email).first()
+
+    if not amigo or amigo.id == current_user.id:
+        return jsonify({"error": "Usuario no válido."}), 400
+
+    if son_amigos(current_user.id, amigo.id):
+        return jsonify({"error": "Ya son amigos."}), 400
+
+    amistad = Amistad(usuario_id=current_user.id, amigo_id=amigo.id)
+    db.session.add(amistad)
+    db.session.commit()
+    return redirect(url_for('ver_amigos'))
+
+# ------------------------ RUTA PARA VER AMIGOS ------------------------
+@app.route("/amigos")
+@login_required
+def ver_amigos():
+    amistades = Amistad.query.filter_by(usuario_id=current_user.id).all()
+    amigos = [User.query.get(a.amigo_id) for a in amistades]
+    return render_template("amigos.html", amigos=amigos)
+
+# ------------------------ RUTA PARA VER CHAT PRIVADO ------------------------
+@app.route("/chat/<int:amigo_id>", methods=["GET", "POST"])
+@login_required
+def chat_privado(amigo_id):
+    if not son_amigos(current_user.id, amigo_id):
+        return "No son amigos", 403
+
+    amigo = User.query.get_or_404(amigo_id)
+
+    if request.method == "POST":
+        mensaje = request.form.get("mensaje")
+        if mensaje:
+            nuevo = ChatMessage(sender_id=current_user.id, receiver_id=amigo_id, message=mensaje)
+            db.session.add(nuevo)
+            db.session.commit()
+            return redirect(url_for('chat_privado', amigo_id=amigo_id))
+
+    mensajes = ChatMessage.query.filter(
+        or_(
+            (ChatMessage.sender_id == current_user.id) & (ChatMessage.receiver_id == amigo_id),
+            (ChatMessage.sender_id == amigo_id) & (ChatMessage.receiver_id == current_user.id)
+        )
+    ).order_by(ChatMessage.timestamp.asc()).all()
+
+    return render_template("chat.html", amigo=amigo, mensajes=mensajes)
+
+# ------------------------ PLANTILLAS BÁSICAS JINJA (PUEDES MEJORAR VISUAL) ------------------------
+# templates/amigos.html
+"""
+{% extends "base.html" %}
+{% block content %}
+<h2>👥 Lista de Amigos</h2>
+<ul>
+{% for amigo in amigos %}
+    <li>
+        {{ amigo.nombre }} - <a href="{{ url_for('chat_privado', amigo_id=amigo.id) }}">Chatear</a>
+    </li>
+{% endfor %}
+</ul>
+<form method="POST" action="/agregar_amigo">
+    <input type="text" name="email" placeholder="Email del amigo" required>
+    <button type="submit">Agregar amigo</button>
+</form>
+{% endblock %}
+"""
+
+# templates/chat.html
+"""
+{% extends "base.html" %}
+{% block content %}
+<h2>💬 Chat con {{ amigo.nombre }}</h2>
+<div style="background: #f9f9f9; padding: 10px; border-radius: 5px;">
+{% for msg in mensajes %}
+    <p><strong>{{ 'Tú' if msg.sender_id == current_user.id else amigo.nombre }}:</strong> {{ msg.message }}</p>
+{% endfor %}
+</div>
+<form method="POST">
+    <input type="text" name="mensaje" placeholder="Escribe tu mensaje..." required>
+    <button type="submit">Enviar</button>
+</form>
+{% endblock %}
+"""
