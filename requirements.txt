@@ -8,3 +8,4 @@ eventlet
 requests
 replit
 sqlalchemy
+flask_sqlalchemy
