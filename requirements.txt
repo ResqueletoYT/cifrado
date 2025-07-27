@@ -1,3 +1,9 @@
 Flask
 pycryptodome
 gunicorn
+pytz
+flask
+flask_socketio
+eventlet
+requests
+replit
