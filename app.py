@@ -250,3 +250,156 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
+# =======================
+# Módulo: Extensiones Avanzadas
+# =======================
+
+from flask_socketio import SocketIO, emit, join_room, leave_room
+from datetime import datetime, timedelta
+import pytz
+import os
+import json
+import requests
+
+# Inicializar WebSocket (agrega esto en la app Flask principal)
+socketio = SocketIO(app)
+
+# ============================
+# 1. Configuración y Constantes
+# ============================
+
+ZONA_HORARIA = pytz.timezone('Europe/Madrid')
+CLAVE_MAESTRA = "tu_clave_maestra_secreta"
+ARCHIVO_HISTORIAL = "historial.json"
+ARCHIVO_USUARIOS = "usuarios.json"
+TIEMPO_LIMPIEZA = 30  # en días
+
+# ============================
+# 2. Funciones Auxiliares
+# ============================
+
+def obtener_hora_local():
+    return datetime.now(ZONA_HORARIA).strftime('%Y-%m-%d %H:%M:%S')
+
+def limpiar_historial():
+    if not os.path.exists(ARCHIVO_HISTORIAL):
+        return
+    with open(ARCHIVO_HISTORIAL, 'r', encoding='utf-8') as f:
+        historial = json.load(f)
+    ahora = datetime.now(ZONA_HORARIA)
+    historial = [e for e in historial if (ahora - datetime.strptime(e['fecha_hora'], '%Y-%m-%d %H:%M:%S')).days <= TIEMPO_LIMPIEZA]
+    with open(ARCHIVO_HISTORIAL, 'w', encoding='utf-8') as f:
+        json.dump(historial, f, ensure_ascii=False, indent=2)
+
+def obtener_ubicacion():
+    try:
+        ip_info = requests.get("https://ipinfo.io").json()
+        return ip_info.get("city", "¿?") + ", " + ip_info.get("country", "¿?")
+    except:
+        return "Desconocida"
+
+def guardar_en_historial(modo, original, procesado):
+    limpiar_historial()
+    entrada = {
+        "fecha_hora": obtener_hora_local(),
+        "modo": modo,
+        "mensaje_original": original,
+        "mensaje_procesado": procesado,
+        "ubicacion": obtener_ubicacion()
+    }
+    if os.path.exists(ARCHIVO_HISTORIAL):
+        with open(ARCHIVO_HISTORIAL, 'r', encoding='utf-8') as f:
+            historial = json.load(f)
+    else:
+        historial = []
+    historial.append(entrada)
+    with open(ARCHIVO_HISTORIAL, 'w', encoding='utf-8') as f:
+        json.dump(historial, f, ensure_ascii=False, indent=2)
+
+# ============================
+# 3. Mensajes de visualización única
+# ============================
+
+mensajes_temporales = {}  # clave: id, valor: mensaje
+
+def guardar_mensaje_temporal(id_msg, contenido):
+    mensajes_temporales[id_msg] = contenido
+
+def obtener_y_borrar_mensaje_temporal(id_msg):
+    return mensajes_temporales.pop(id_msg, None)
+
+# ============================
+# 4. Búsqueda en historial
+# ============================
+
+def buscar_historial(filtro: str):
+    if not os.path.exists(ARCHIVO_HISTORIAL):
+        return []
+    with open(ARCHIVO_HISTORIAL, 'r', encoding='utf-8') as f:
+        historial = json.load(f)
+    return [e for e in historial if filtro.lower() in json.dumps(e, ensure_ascii=False).lower()]
+
+# ============================
+# 5. WebSockets para chat en vivo
+# ============================
+
+usuarios_conectados = {}
+
+@socketio.on('join')
+def handle_join(data):
+    usuario = data['usuario']
+    room = data['sala']
+    join_room(room)
+    usuarios_conectados[usuario] = room
+    emit('estado', {'msg': f'{usuario} se ha unido a la sala.'}, room=room)
+
+@socketio.on('mensaje')
+def handle_mensaje(data):
+    usuario = data['usuario']
+    sala = usuarios_conectados.get(usuario)
+    msg = data['msg']
+    if sala:
+        emit('nuevo_mensaje', {'usuario': usuario, 'msg': msg, 'hora': obtener_hora_local()}, room=sala)
+
+@socketio.on('salir')
+def handle_salir(data):
+    usuario = data['usuario']
+    room = usuarios_conectados.pop(usuario, None)
+    if room:
+        leave_room(room)
+        emit('estado', {'msg': f'{usuario} ha salido de la sala.'}, room=room)
+
+# ============================
+# 6. Clave maestra para acceder historial
+# ============================
+
+def verificar_clave_maestra(clave):
+    return clave == CLAVE_MAESTRA
+
+# ============================
+# 7. Guardado cifrado remoto (estructura básica)
+# ============================
+
+def guardar_remoto_cifrado(data, clave):
+    # Simulación: guardar local, pero se puede extender a Firebase, etc.
+    from Crypto.Cipher import AES
+    from Crypto.Random import get_random_bytes
+    from base64 import b64encode
+
+    key = clave[:32].ljust(32).encode()
+    cipher = AES.new(key, AES.MODE_EAX)
+    nonce = cipher.nonce
+    ciphertext, tag = cipher.encrypt_and_digest(json.dumps(data).encode())
+
+    paquete = {
+        "nonce": b64encode(nonce).decode(),
+        "ciphertext": b64encode(ciphertext).decode(),
+        "tag": b64encode(tag).decode()
+    }
+    with open("copia_remota_simulada.json", 'w', encoding='utf-8') as f:
+        json.dump(paquete, f, indent=2)
+
+# ============================
+# FIN DEL MÓDULO
+# ============================
+# ¡Puedes importar o copiar estas funciones al final de tu app!
