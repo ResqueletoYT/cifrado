@@ -188,3 +188,69 @@ if __name__ == '__main__':
     except (ValueError, TypeError):
         port = 5000
     app.run(host='0.0.0.0', port=port)
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Random import get_random_bytes
+import base64
+
+# Constantes
+SALT_SIZE = 16
+IV_SIZE = 16
+KEY_SIZE = 32  # AES-256
+PBKDF2_ITERATIONS = 100_000
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    """Deriva una clave AES a partir de la contraseña y la sal usando PBKDF2."""
+    return PBKDF2(password, salt, dkLen=KEY_SIZE, count=PBKDF2_ITERATIONS)
+
+def encrypt(plaintext: str, password: str) -> str:
+    """Cifra el texto usando AES-CBC con clave derivada del password.
+    Devuelve el resultado codificado en base64 con formato: salt + iv + ciphertext."""
+    salt = get_random_bytes(SALT_SIZE)
+    key = derive_key(password.encode(), salt)
+    iv = get_random_bytes(IV_SIZE)
+
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    # Padding PKCS7
+    pad_len = AES.block_size - len(plaintext.encode()) % AES.block_size
+    padding = chr(pad_len) * pad_len
+    padded_text = plaintext + padding
+
+    ciphertext = cipher.encrypt(padded_text.encode())
+    encrypted_data = salt + iv + ciphertext
+    return base64.b64encode(encrypted_data).decode()
+
+def decrypt(enc_b64: str, password: str) -> str:
+    """Descifra el texto cifrado en base64 con la clave derivada de password.
+    Devuelve el texto original o lanza excepción si la clave es incorrecta."""
+    encrypted_data = base64.b64decode(enc_b64)
+    salt = encrypted_data[:SALT_SIZE]
+    iv = encrypted_data[SALT_SIZE:SALT_SIZE+IV_SIZE]
+    ciphertext = encrypted_data[SALT_SIZE+IV_SIZE:]
+
+    key = derive_key(password.encode(), salt)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    padded_text = cipher.decrypt(ciphertext)
+
+    # Quitar padding PKCS7
+    pad_len = padded_text[-1]
+    if isinstance(pad_len, str):  # En python3 es int, en python2 str
+        pad_len = ord(pad_len)
+    if pad_len < 1 or pad_len > AES.block_size:
+        raise ValueError("Clave incorrecta o datos corruptos")
+    return padded_text[:-pad_len].decode()
+
+# Ejemplo de uso
+if __name__ == "__main__":
+    texto = input("Texto a cifrar: ")
+    clave = input("Clave para cifrar: ")
+
+    cifrado = encrypt(texto, clave)
+    print(f"Texto cifrado:\n{cifrado}\n")
+
+    clave_descifrado = input("Clave para descifrar: ")
+    try:
+        descifrado = decrypt(cifrado, clave_descifrado)
+        print(f"Texto descifrado:\n{descifrado}")
+    except Exception as e:
+        print(f"Error al descifrar: {str(e)}")
