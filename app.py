@@ -239,3 +239,80 @@ def descargar_historial():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
+# --- INICIO: Chat Privado entre Amigos ---
+
+@app.route("/chat/<amigo>", methods=["GET", "POST"])
+@login_required
+def chat(amigo):
+    usuario = User.query.filter_by(username=session["usuario"]).first()
+    amigo_usuario = User.query.filter_by(username=amigo).first()
+
+    if not amigo_usuario:
+        return "Usuario no encontrado."
+
+    # Verificar si son amigos
+    son_amigos = Friend.query.filter(
+        ((Friend.user_id == usuario.id) & (Friend.friend_id == amigo_usuario.id)) |
+        ((Friend.user_id == amigo_usuario.id) & (Friend.friend_id == usuario.id))
+    ).first()
+
+    if not son_amigos:
+        return "No sois amigos."
+
+    mensajes = ChatMessage.query.filter(
+        ((ChatMessage.user_from == usuario.username) & (ChatMessage.user_to == amigo)) |
+        ((ChatMessage.user_from == amigo) & (ChatMessage.user_to == usuario.username))
+    ).order_by(ChatMessage.timestamp.asc()).all()
+
+    if request.method == "POST":
+        contenido = request.form.get("mensaje")
+        if contenido:
+            nuevo_mensaje = ChatMessage(user_from=usuario.username, user_to=amigo, content=contenido)
+            db.session.add(nuevo_mensaje)
+            db.session.commit()
+            return redirect(url_for("chat", amigo=amigo))
+
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>Chat con {{ amigo }}</title>
+        <style>
+            body { font-family: Arial, sans-serif; background-color: #f0f0f0; padding: 20px; }
+            .chat-container { max-width: 700px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; }
+            .mensaje { margin-bottom: 10px; padding: 10px; background: #e9ecef; border-radius: 5px; }
+            .yo { background: #d1e7dd; text-align: right; }
+            .formulario { margin-top: 20px; display: flex; gap: 10px; }
+            .formulario input[type=text] { flex-grow: 1; padding: 10px; }
+            .formulario button { padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        </style>
+    </head>
+    <body>
+        <div class="chat-container">
+            <h2>Chat con {{ amigo }}</h2>
+            {% for m in mensajes %}
+                <div class="mensaje {% if m.user_from == usuario %}yo{% endif %}">
+                    <strong>{{ m.user_from }}</strong>: {{ m.content }}
+                </div>
+            {% endfor %}
+            <form class="formulario" method="POST">
+                <input type="text" name="mensaje" placeholder="Escribe tu mensaje..." required>
+                <button type="submit">Enviar</button>
+            </form>
+            <a href="/dashboard">Volver al panel</a>
+        </div>
+    </body>
+    </html>
+    """, amigo=amigo, mensajes=mensajes, usuario=usuario.username)
+
+# Modelo para mensajes de chat
+class ChatMessage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_from = db.Column(db.String(150), nullable=False)
+    user_to = db.Column(db.String(150), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+# --- FIN: Chat Privado entre Amigos ---
