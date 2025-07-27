@@ -1,12 +1,9 @@
 Flask
+Flask-SocketIO
+Flask-Login
+Flask-SQLAlchemy
 pycryptodome
 gunicorn
-pytz
-flask
-flask_socketio
 eventlet
 requests
-replit
-sqlalchemy
-flask_sqlalchemy
-flask_login
+pytz
