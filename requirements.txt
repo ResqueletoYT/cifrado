@@ -9,3 +9,4 @@ requests
 replit
 sqlalchemy
 flask_sqlalchemy
+flask_login
