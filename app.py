@@ -147,24 +147,14 @@ def historial():
     <form method='get' action='/'><button>Volver</button></form></body></html>
     """
 
-@app.route("/estadisticas", methods=["GET", "POST"])
+@app.route("/estadisticas", methods=["GET"])
 def estadisticas():
-    if request.method == "POST":
-        passw = request.form.get("pass", "")
-        if passw == SECRET_HISTORIAL_PASSWORD:
-            with open(STATS_FILE, "r") as f:
-                stats = json.load(f)
-            return f"""
-            <html><body><h2>📊 Estadísticas Personales</h2>
-            <p>Mensajes cifrados: {stats["cifrados"]}</p>
-            <p>Mensajes descifrados: {stats["descifrados"]}</p>
-            <form method='get' action='/'><button>Volver</button></form></body></html>
-            """
-        else:
-            return redirect("/estadisticas")
-    return """
-    <html><body><h2>Introduce la contraseña para estadísticas</h2>
-    <form method='post'><input type='password' name='pass'><button type='submit'>Ver</button></form>
+    with open(STATS_FILE, "r") as f:
+        stats = json.load(f)
+    return f"""
+    <html><body><h2>📊 Estadísticas Personales</h2>
+    <p>Mensajes cifrados: {stats["cifrados"]}</p>
+    <p>Mensajes descifrados: {stats["descifrados"]}</p>
     <form method='get' action='/'><button>Volver</button></form></body></html>
     """
 
