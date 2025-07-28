@@ -2,13 +2,15 @@
 # 💡 FUNCIONALIDADES: Cifrado con clave, historial seguro con contraseña, selector de temas, soporte multilenguaje, interfaz móvil + PC, estadísticas, y más.
 # 📦 Requiere: Flask, pycryptodome, pytz, flask_socketio, eventlet
 
-from flask import Flask, request, redirect, make_response
+from flask import Flask, request, redirect, make_response, send_file, jsonify
 from flask_socketio import SocketIO
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from base64 import b64encode, b64decode
 from datetime import datetime
 import pytz, os, json
+from io import BytesIO
+import re
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -158,6 +160,88 @@ def estadisticas():
     <form method='get' action='/'><button>Volver</button></form></body></html>
     """
 
+
+# 🔍 BÚSQUEDA AVANZADA EN HISTORIAL
+@app.route("/buscar", methods=["GET"])
+def buscar_historial():
+    accion = request.args.get("accion", "").lower()
+    palabra = request.args.get("palabra", "").lower()
+    fecha = request.args.get("fecha", "")
+    resultados = []
+    try:
+        with open(HISTORIAL_FILE, "r", encoding="utf-8") as f:
+            for linea in f:
+                if (accion in linea.lower()) and (palabra in linea.lower()) and (fecha in linea):
+                    resultados.append(linea.strip())
+    except:
+        resultados = ["❌ Error leyendo el historial."]
+    return jsonify(resultados)
+
+# 📂 DESCARGA DEL HISTORIAL
+@app.route("/descargar_historial", methods=["GET"])
+def descargar_historial():
+    try:
+        with open(HISTORIAL_FILE, "r", encoding="utf-8") as f:
+            contenido = f.read()
+        buffer = BytesIO()
+        buffer.write(contenido.encode())
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True, download_name="historial.txt", mimetype="text/plain")
+    except:
+        return "❌ Error al descargar historial."
+
+# 💣 MENSAJES AUTODESTRUCTIVOS (una vez leídos se eliminan)
+AUTO_MENSAJES = {}  # clave aleatoria -> contenido
+
+@app.route("/crear_auto", methods=["POST"])
+def crear_mensaje_autodestructivo():
+    texto = request.form.get("texto", "")
+    clave = os.urandom(6).hex()
+    AUTO_MENSAJES[clave] = texto
+    return f"Tu clave para un solo uso: /ver_auto/{clave}"
+
+@app.route("/ver_auto/<clave>", methods=["GET"])
+def ver_mensaje_autodestructivo(clave):
+    mensaje = AUTO_MENSAJES.pop(clave, "❌ Mensaje ya leído o no existe.")
+    return f"<pre>{mensaje}</pre><a href='/'>Volver</a>"
+
+# 🌙 AUTO-TEMA SEGÚN HORA LOCAL
+def tema_por_defecto_auto():
+    hora = datetime.now(pytz.timezone("Europe/Madrid")).hour
+    if 6 <= hora < 18:
+        return "claro"
+    else:
+        return "oscuro"
+
+# 🚫 BLOQUEO POR INTENTOS FALLIDOS
+INTENTOS_FALLIDOS = {}
+
+@app.route("/intento_historial", methods=["POST"])
+def intento_historial():
+    ip = request.remote_addr
+    clave = request.form.get("pass", "")
+    if INTENTOS_FALLIDOS.get(ip, 0) >= 3:
+        return "❌ Has superado el número de intentos permitidos.", 403
+    if clave == SECRET_HISTORIAL_PASSWORD:
+        INTENTOS_FALLIDOS[ip] = 0
+        return redirect("/historial")
+    else:
+        INTENTOS_FALLIDOS[ip] = INTENTOS_FALLIDOS.get(ip, 0) + 1
+        return redirect("/historial")
+
 if __name__ == "__main__":
+    import eventlet
+    import ssl
+    # Protección básica contra XSS en cabeceras
+    @app.after_request
+    def aplicar_cabeceras_seguridad(respuesta):
+        respuesta.headers["Content-Security-Policy"] = "default-src 'self'"
+        respuesta.headers["X-Frame-Options"] = "DENY"
+        respuesta.headers["X-Content-Type-Options"] = "nosniff"
+        respuesta.headers["Referrer-Policy"] = "no-referrer"
+        respuesta.headers["Permissions-Policy"] = "geolocation=(), microphone=()"
+        return respuesta
+
+    print("🚀 Servidor de cifrado iniciado en http://localhost:10000")
     socketio.run(app, host="0.0.0.0", port=10000)
 
